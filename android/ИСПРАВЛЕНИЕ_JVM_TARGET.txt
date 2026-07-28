@@ -1,0 +1,14 @@
+Исправлена несовместимость:
+Java target 1.8
+Kotlin target 21
+
+Теперь:
+Java target 17
+Kotlin JVM Toolchain 17
+
+Рекомендуемый Gradle JDK в Android Studio: jbr-17.
+
+После замены проекта:
+1. File → Sync Project with Gradle Files
+2. Build → Clean Project
+3. Build → Rebuild Project

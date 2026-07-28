@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SourceProfile",
+  "type": "object",
+  "required": ["id", "name", "streamKey", "type", "enabled"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string", "minLength": 1 },
+    "streamKey": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+    "type": { "enum": ["gopro", "dji", "phone", "rtmp"] },
+    "enabled": { "type": "boolean" },
+    "notes": { "type": "string" },
+    "order": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": true
+}

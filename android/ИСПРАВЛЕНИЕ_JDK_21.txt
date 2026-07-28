@@ -1,0 +1,18 @@
+Проект требует JDK 21, который встроен в актуальную Android Studio.
+
+Настройка:
+Android Studio
+→ Settings
+→ Build, Execution, Deployment
+→ Build Tools
+→ Gradle
+→ Gradle JDK
+→ Embedded JDK / jbr-21
+
+Затем:
+1. File → Sync Project with Gradle Files
+2. Build → Clean Project
+3. Build → Rebuild Project
+
+Если Gradle продолжает помнить старый JDK:
+File → Invalidate Caches → Invalidate and Restart
