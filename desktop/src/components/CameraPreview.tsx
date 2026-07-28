@@ -8,8 +8,20 @@ type PreviewState =
   | "idle"
   | "connecting"
   | "playing"
-  | "stalled"
+  | "recovering"
   | "failed";
+
+type VideoWithFrameCallback = HTMLVideoElement & {
+  requestVideoFrameCallback?: (
+    callback: (now: DOMHighResTimeStamp, metadata: VideoFrameCallbackMetadata) => void
+  ) => number;
+  cancelVideoFrameCallback?: (handle: number) => void;
+};
+
+function cacheBust(url: string, token: number) {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}scc=${token}-${Date.now()}`;
+}
 
 export function CameraPreview({
   active,
@@ -27,7 +39,10 @@ export function CameraPreview({
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<mpegts.Player | null>(null);
   const timersRef = useRef<number[]>([]);
-  const lastProgressRef = useRef({ mediaTime: 0, changedAt: 0 });
+  const frameCallbackRef = useRef<number | null>(null);
+  const lastFrameAtRef = useRef(0);
+  const recoveryCountRef = useRef(0);
+
   const [engine, setEngine] = useState<PreviewEngine>(
     mode === "hls" ? "hls" : "flv"
   );
@@ -37,6 +52,18 @@ export function CameraPreview({
   const clearTimers = () => {
     timersRef.current.forEach(timer => window.clearInterval(timer));
     timersRef.current = [];
+  };
+
+  const stopFrameCallback = () => {
+    const video = videoRef.current as VideoWithFrameCallback | null;
+    if (
+      video &&
+      frameCallbackRef.current !== null &&
+      video.cancelVideoFrameCallback
+    ) {
+      video.cancelVideoFrameCallback(frameCallbackRef.current);
+    }
+    frameCallbackRef.current = null;
   };
 
   const destroyFlv = () => {
@@ -62,18 +89,21 @@ export function CameraPreview({
     clearTimers();
     setEngine("hls");
     setState("connecting");
+    setRestartToken(value => value + 1);
   }, [hlsUrl, mode]);
 
   useEffect(() => {
+    recoveryCountRef.current = 0;
     setEngine(mode === "hls" ? "hls" : "flv");
     setRestartToken(value => value + 1);
   }, [mode, flvUrl, hlsUrl]);
 
   useEffect(() => {
-    const video = videoRef.current;
+    const video = videoRef.current as VideoWithFrameCallback | null;
 
     const cleanup = () => {
       clearTimers();
+      stopFrameCallback();
       destroyFlv();
       if (video) {
         video.pause();
@@ -100,50 +130,69 @@ export function CameraPreview({
     }
 
     setState("connecting");
-    lastProgressRef.current = {
-      mediaTime: 0,
-      changedAt: performance.now()
-    };
+    lastFrameAtRef.current = performance.now();
 
-    const markPlaying = () => {
-      lastProgressRef.current = {
-        mediaTime: video.currentTime,
-        changedAt: performance.now()
-      };
+    const markFrame = () => {
+      lastFrameAtRef.current = performance.now();
+      recoveryCountRef.current = 0;
       setState("playing");
     };
 
+    const requestNextFrame = () => {
+      if (!video.requestVideoFrameCallback) return;
+      frameCallbackRef.current = video.requestVideoFrameCallback(() => {
+        markFrame();
+        requestNextFrame();
+      });
+    };
+
+    const onPlaying = () => {
+      markFrame();
+      requestNextFrame();
+    };
+
     const onTimeUpdate = () => {
-      const progress = lastProgressRef.current;
-      if (video.currentTime > progress.mediaTime + 0.04) {
-        lastProgressRef.current = {
-          mediaTime: video.currentTime,
-          changedAt: performance.now()
-        };
-        setState("playing");
-      }
+      // Fallback for WebViews without requestVideoFrameCallback.
+      if (!video.requestVideoFrameCallback) markFrame();
     };
 
     const onVideoError = () => {
       if (engine === "flv") {
         fallbackToHls();
+      } else if (recoveryCountRef.current < 3) {
+        recoveryCountRef.current += 1;
+        setState("recovering");
+        setRestartToken(value => value + 1);
       } else {
         setState("failed");
       }
     };
 
-    video.addEventListener("playing", markPlaying);
+    const onWaiting = () => {
+      if (state !== "connecting") setState("recovering");
+    };
+
+    video.addEventListener("playing", onPlaying);
+    video.addEventListener("loadeddata", markFrame);
     video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("error", onVideoError);
+    video.addEventListener("waiting", onWaiting);
+    video.addEventListener("stalled", onWaiting);
 
     if (engine === "hls") {
       if (!video.canPlayType("application/vnd.apple.mpegurl")) {
         setState("failed");
         return cleanup;
       }
-      video.src = sourceUrl;
+
+      video.preload = "auto";
+      video.src = cacheBust(sourceUrl, restartToken);
       video.load();
-      video.play().catch(() => setState("failed"));
+      video.play().catch(() => {
+        // Muted autoplay normally works. A temporary rejection while the
+        // playlist is loading is not treated as a fatal stream error.
+        setState("connecting");
+      });
     } else {
       if (!mpegts.isSupported()) {
         fallbackToHls();
@@ -179,7 +228,6 @@ export function CameraPreview({
       player.load();
       player.play().catch(() => undefined);
 
-      // Keep FLV near the live edge, but do not seek until several frames exist.
       timersRef.current.push(
         window.setInterval(() => {
           if (!video.buffered.length || video.readyState < 2) return;
@@ -194,26 +242,38 @@ export function CameraPreview({
       );
     }
 
-    // DJI Fly can produce a valid first frame while subsequent MSE timestamps
-    // stop advancing in WebKit. Detect this case and change to native HLS.
+    // Watch decoded frames rather than currentTime. DJI Fly streams can keep
+    // the media element "playing" while WebKit displays only one frame.
     timersRef.current.push(
       window.setInterval(() => {
         if (video.readyState < 2 || video.paused) return;
-        const progress = lastProgressRef.current;
-        const frozenFor = performance.now() - progress.changedAt;
-        if (frozenFor < 4000) return;
+        const frozenFor = performance.now() - lastFrameAtRef.current;
+        if (frozenFor < 6000) return;
 
-        setState("stalled");
+        setState("recovering");
+
         if (engine === "flv" && mode === "auto") {
           fallbackToHls();
+          return;
         }
-      }, 1000)
+
+        // Native HLS in WKWebView occasionally stops refreshing a live
+        // playlist. Re-assigning a cache-busted URL forces a fresh playlist
+        // request and resumes from the newest segment.
+        if (engine === "hls") {
+          recoveryCountRef.current += 1;
+          setRestartToken(value => value + 1);
+        }
+      }, 1500)
     );
 
     return () => {
-      video.removeEventListener("playing", markPlaying);
+      video.removeEventListener("playing", onPlaying);
+      video.removeEventListener("loadeddata", markFrame);
       video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("error", onVideoError);
+      video.removeEventListener("waiting", onWaiting);
+      video.removeEventListener("stalled", onWaiting);
       cleanup();
     };
   }, [
@@ -227,6 +287,7 @@ export function CameraPreview({
   ]);
 
   const restart = () => {
+    recoveryCountRef.current = 0;
     setEngine(mode === "hls" ? "hls" : "flv");
     setRestartToken(value => value + 1);
   };
@@ -250,19 +311,19 @@ export function CameraPreview({
         <span className={`preview-dot ${state === "playing" ? "" : "waiting"}`} />
         {state === "playing"
           ? `LIVE · ${engine.toUpperCase()}`
-          : state === "stalled"
-            ? "КАДР ЗАВИС"
+          : state === "recovering"
+            ? `ВОССТАНОВЛЕНИЕ · ${engine.toUpperCase()}`
             : state === "failed"
               ? "НЕТ ПРЕВЬЮ"
               : `${engine.toUpperCase()} · ПОДКЛЮЧЕНИЕ`}
       </div>
 
-      {(state === "connecting" || state === "stalled" || state === "failed") && (
-        <div className="preview-overlay">
+      {(state === "connecting" || state === "recovering" || state === "failed") && (
+        <div className={`preview-overlay ${state === "recovering" ? "soft" : ""}`}>
           <strong>{camera > 0 ? `Камера ${camera}` : "Источник"}</strong>
           <span>
-            {state === "stalled"
-              ? "Поток есть, но изображение не обновляется"
+            {state === "recovering"
+              ? "Обновляем live-плейлист и переходим к последнему кадру"
               : state === "failed"
                 ? "Не удалось открыть предпросмотр"
                 : engine === "hls"

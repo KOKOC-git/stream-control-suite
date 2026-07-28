@@ -196,3 +196,6 @@ button.compact{padding:7px 10px;font-size:12px}
 
 .preview-overlay-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px}
 .profile-editor select{width:100%;min-height:42px;padding:9px 10px;border:1px solid #343740;border-radius:8px;background:#111216;color:#f2f3f5}
+
+.preview-overlay.soft{background:linear-gradient(to bottom,rgba(10,11,14,.18),rgba(10,11,14,.62));pointer-events:none}
+.preview-overlay.soft .preview-overlay-actions{pointer-events:auto}
