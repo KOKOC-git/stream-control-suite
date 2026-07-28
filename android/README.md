@@ -1,4 +1,4 @@
-# Stream Control Remote — Android 1.1.3
+# Stream Control Remote — Android 1.2.0
 
 Мобильный пульт и анализатор Wi‑Fi для Stream Control Center и SRS.
 
@@ -137,3 +137,16 @@ Settings
 - исправлен экспорт `WifiSnapshot.quality` в CSV;
 - добавлен `@OptIn(ExperimentalMaterial3Api::class)` для Material 3 TopAppBar;
 - Java и Kotlin остаются на JVM 21.
+
+
+## GoPro Labs QR в версии 1.2.0
+
+У каждого профиля типа GoPro появилась кнопка `QR GoPro`. Генератор создаёт три QR-кода:
+
+1. сохранение SSID и пароля Wi‑Fi;
+2. сохранение `rtmp://IP_НОУТБУКА/live/STREAM_KEY`;
+3. запуск стрима в 480p, 720p или 1080p.
+
+Коды показываются крупно на белом фоне, чтобы камера могла считать их прямо с экрана телефона. Также можно скопировать исходную Labs-команду.
+
+Важно: GoPro должна иметь совместимую прошивку Labs, а перед первым livestream камера должна быть хотя бы один раз сопряжена с GoPro Quik.

@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -142,6 +143,7 @@ private fun FlvPlayer(url: String) {
 @Composable
 private fun SourcesScreen(state: AppUiState, vm: MainViewModel) {
     var showAdd by remember { mutableStateOf(false) }
+    var qrProfile by remember { mutableStateOf<SourceProfile?>(null) }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("+ Добавить источник") } }
         items(state.profiles, key = { it.id }) { p ->
@@ -152,12 +154,29 @@ private fun SourcesScreen(state: AppUiState, vm: MainViewModel) {
                         Text("${p.type.title} · ${p.streamKey}")
                         Text("rtmp://${state.serverIp}/live/${p.streamKey}", style = MaterialTheme.typography.labelSmall)
                     }
-                    TextButton(onClick = { vm.deleteProfile(p.id) }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                    Column(horizontalAlignment = Alignment.End) {
+                        if (p.type == SourceType.GOPRO) {
+                            TextButton(onClick = { qrProfile = p }) {
+                                Text("QR GoPro")
+                            }
+                        }
+                        TextButton(onClick = { vm.deleteProfile(p.id) }) {
+                            Text("Удалить", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                 }
             }
         }
     }
     if (showAdd) AddSourceDialog(state.serverIp, { showAdd = false }) { name, key, type -> vm.addProfile(name, key, type); showAdd = false }
+    qrProfile?.let { profile ->
+        GoProQrDialog(
+            profile = profile,
+            serverIp = state.serverIp,
+            currentSsid = state.wifi.ssid,
+            onDismiss = { qrProfile = null }
+        )
+    }
 }
 
 @Composable
