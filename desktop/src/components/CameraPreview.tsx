@@ -226,7 +226,11 @@ export function CameraPreview({
       player.attachMediaElement(video);
       player.on(mpegts.Events.ERROR, fallbackToHls);
       player.load();
-      player.play().catch(() => undefined);
+      const playResult = player.play();
+
+      if (playResult) {
+        playResult.catch(() => undefined);
+      }
 
       timersRef.current.push(
         window.setInterval(() => {

@@ -1,6 +1,6 @@
 [package]
 name = "stream-control-center"
-version = "2.9.1"
+version = "3.0.0"
 description = "Universal RTMP source, SRS and OBS control center"
 authors = ["Ilya"]
 edition = "2021"
